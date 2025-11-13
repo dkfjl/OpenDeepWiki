@@ -104,64 +104,26 @@ public static partial class GenerateThinkCatalogueService
 
         history.AddSystemEnhance();
 
-        var contents = new ChatMessageContentItemCollection()
-        {
-            new TextContent(enhancedPrompt),
-            new TextContent(
-                $"""
+        // 优化提示词：简化系统提醒，减少长度
+        var simplifiedSystemReminder = $"""
                  <system-reminder>
-                 <catalog_tool_usage_guidelines>
-                 **PARALLEL READ OPERATIONS**
-                 - MANDATORY: Always perform PARALLEL File.Read calls — batch multiple files in a SINGLE message for maximum efficiency
-                 - CRITICAL: Read MULTIPLE files simultaneously in one operation
-                 - PROHIBITED: Sequential one-by-one file reads (inefficient and wastes context capacity)
-
-                 **EDITING OPERATION LIMITS**
-                 - HARD LIMIT: Maximum of 3 editing operations total (catalog.MultiEdit only)
-                 - PRIORITY: Maximize each catalog.MultiEdit operation by bundling ALL related changes across multiple files
-                 - STRATEGIC PLANNING: Consolidate all modifications into minimal MultiEdit operations to stay within the limit
-                 - Use catalog.Write **only once** for initial creation or full rebuild (counts as initial structure creation, not part of the 3 edits)
-                 - Always verify content before further changes using catalog.Read (Reads do NOT count toward limit)
-
-                 **CRITICAL MULTIEDIT BEST PRACTICES**
-                 - MAXIMIZE EFFICIENCY: Each MultiEdit should target multiple distinct sections across files
-                 - AVOID CONFLICTS: Never edit overlapping or identical content regions within the same MultiEdit operation
-                 - UNIQUE TARGETS: Ensure each edit instruction addresses a completely different section or file
-                 - BATCH STRATEGY: Group all necessary changes by proximity and relevance, but maintain clear separation between edit targets
-
-                 **RECOMMENDED EDITING SEQUENCE**
-                 1. catalog.Write (one-time full structure creation)
-                 2. catalog.MultiEdit with maximum parallel changes (counts toward 3-operation limit)
-                 3. Use catalog.Read after each MultiEdit to verify success before next operation
-                 4. Remaining MultiEdit operations for any missed changes
-                 </catalog_tool_usage_guidelines>
-
-
-                 ## Execution steps requirements:
-                 1. Before performing any other operations, you must first invoke the 'agent-think' tool to plan the analytical steps. This is a necessary step for completing each research task.
-                 2. Then, the code structure provided in the code_file must be utilized by calling file.Read to read the code for in-depth analysis, and then use catalog.Write to write the results of the analysis into the catalog directory.
-                 3. If necessary, some parts that need to be optimized can be edited through catalog.MultiEdit.
-
-                 For maximum efficiency, whenever you need to perform multiple independent operations, invoke all relevant tools simultaneously rather than sequentially.
-                 The repository's directory structure has been provided in <code_files>. Please utilize the provided structure directly for file navigation and reading operations, rather than relying on glob patterns or filesystem traversal methods.
-                 Below is an example of the directory structure of the warehouse, where /D represents a directory and /F represents a file:
-                    server/D
-                      src/D
-                        Main/F
-                    web/D
-                      components/D
-                        Header.tsx/F
-
-                 {Prompt.Language}
-
+                 **PARALLEL READ OPERATIONS**: Batch file reads for efficiency
+                 **EDITING LIMITS**: Max 3 operations (catalog.MultiEdit only)
+                 **EXECUTION STEPS**: 1) agent-think 2) file.Read 3) catalog.Write
+                 **TOOLS**: Use catalog.Read/MultiEdit exclusively, never print JSON
                  </system-reminder>
-                 """),
-            new TextContent(Prompt.Language)
-        };
-        history.AddUserMessage(contents);
+                 """;
+
+        // 使用单个字符串而不是 ChatMessageContentItemCollection 来避免 content 被序列化为数组
+        var combinedContent = $"{enhancedPrompt}\n{simplifiedSystemReminder}\n{Prompt.Language}";
+        
+        // 添加调试日志：记录提示词长度
+        Log.Logger.Information("提示词长度：{length} 字符，尝试次数：{attemptNumber}", combinedContent.Length, attemptNumber + 1);
+        
+        history.AddUserMessage(combinedContent);
 
         var catalogueTool = new CatalogueFunction();
-        var analysisModel =await  KernelFactory.GetKernel(OpenAIOptions.Endpoint,
+        var analysisModel =await KernelFactory.GetKernel(OpenAIOptions.Endpoint,
             OpenAIOptions.ChatApiKey, path, OpenAIOptions.AnalysisModel, false, null,
             builder =>
             {
@@ -209,6 +171,7 @@ public static partial class GenerateThinkCatalogueService
                         break;
 
                     case StreamingChatCompletionUpdate tool when tool.ToolCallUpdates.Count > 0:
+                        Log.Logger.Debug("检测到工具调用更新，工具数量：{count}", tool.ToolCallUpdates.Count);
                         break;
 
                     case StreamingChatCompletionUpdate value:
@@ -248,26 +211,38 @@ public static partial class GenerateThinkCatalogueService
             cts?.Dispose(); // 确保资源被释放
         }
 
-        // Prefer tool-stored JSON when available
-        if (!string.IsNullOrWhiteSpace(catalogueTool.Content))
+        // 添加调试日志：记录工具状态
+        Log.Logger.Information("流式处理完成，输入Token：{inputTokens}，输出Token：{outputTokens}，工具内容长度：{toolContentLength}", 
+            inputTokenCount, outputTokenCount, catalogueTool.Content?.Length ?? 0);
+
+        // 增强错误处理：检查工具内容并提供更好的诊断
+        if (string.IsNullOrWhiteSpace(catalogueTool.Content))
         {
+            Log.Logger.Warning("工具内容为空，尝试次数：{attemptNumber}，将进行重试或质量增强", attemptNumber + 1);
+            
             // 质量增强逻辑
             if (!DocumentOptions.RefineAndEnhanceQuality || attemptNumber >= 3) // 前几次尝试才进行质量增强
-                return ExtractAndParseJson(catalogueTool.Content);
+            {
+                Log.Logger.Information("跳过质量增强，直接返回空结果");
+                return null; // 改进：直接返回null而不是尝试解析空内容
+            }
 
+            Log.Logger.Information("开始质量增强流程");
             await RefineResponse(history, chat, settings, analysisModel);
-
+            
+            // 质量增强后再次检查
+            if (string.IsNullOrWhiteSpace(catalogueTool.Content))
+            {
+                Log.Logger.Warning("质量增强后仍然为空，返回null");
+                return null;
+            }
+            
             return ExtractAndParseJson(catalogueTool.Content);
         }
         else
         {
-            retry++;
-            if (retry > 3)
-            {
-                throw new Exception("AI生成目录的时候重复多次响应空内容");
-            }
-
-            goto retry;
+            Log.Logger.Information("成功获取工具内容，长度：{length}", catalogueTool.Content.Length);
+            return ExtractAndParseJson(catalogueTool.Content);
         }
     }
 
@@ -276,35 +251,62 @@ public static partial class GenerateThinkCatalogueService
     {
         try
         {
-            // 根据尝试次数调整细化策略
+            // 简化细化提示词，减少长度
             const string refinementPrompt = """
-                                                Refine the stored documentation_structure JSON iteratively using tools only:
-                                                - Use Catalogue.Read to inspect the current JSON.
-                                                - Apply several Catalogue.Edit operations to:
-                                                  • add Level 2/3 subsections for core components, features, data models, integrations
-                                                  • normalize kebab-case titles and maintain 'getting-started' then 'deep-dive' ordering
-                                                  • enrich each section's 'prompt' with actionable guidance (scope, code areas, outputs)
-                                                - Prefer localized edits; only use Catalogue.Write for a complete rewrite if necessary.
-                                                - Never print JSON in chat; use tools exclusively.
-                                                - Start by editing some parts that need optimization through catalog.MultiEdit.
-                                            """;
+                 Refine the stored JSON using catalog tools:
+                 - Use catalog.Read to inspect current JSON
+                 - Apply catalog.MultiEdit for improvements (max 3 operations)
+                 - Focus on: structure, completeness, and accuracy
+                 - Never print JSON in chat, use tools only
+                 """;
 
             history.AddUserMessage(refinementPrompt);
+            Log.Logger.Information("发送质量增强请求");
 
             await foreach (var _ in chat.GetStreamingChatMessageContentsAsync(history, settings, kernel))
             {
+                // 简化处理，只记录关键信息
             }
+            
+            Log.Logger.Information("质量增强流程完成");
         }
         catch (Exception ex)
         {
+            Log.Logger.Error(ex, "质量增强过程中发生错误");
         }
     }
 
     private static DocumentResultCatalogue? ExtractAndParseJson(string responseText)
     {
-        var extractedJson = JsonConvert.DeserializeObject<DocumentResultCatalogue>(responseText);
+        try
+        {
+            Log.Logger.Debug("尝试解析JSON，长度：{length}", responseText?.Length ?? 0);
+            
+            if (string.IsNullOrWhiteSpace(responseText))
+            {
+                Log.Logger.Warning("尝试解析空的JSON响应");
+                return null;
+            }
 
-        return extractedJson;
+            var extractedJson = JsonConvert.DeserializeObject<DocumentResultCatalogue>(responseText);
+            
+            if (extractedJson != null)
+            {
+                Log.Logger.Information("JSON解析成功，项目数量：{count}", 
+                    extractedJson.Items?.Count ?? 0);
+            }
+            else
+            {
+                Log.Logger.Warning("JSON解析返回null");
+            }
+            
+            return extractedJson;
+        }
+        catch (Exception ex)
+        {
+            Log.Logger.Error(ex, "JSON解析失败");
+            return null;
+        }
     }
 
     private static ErrorType ClassifyError(Exception ex)
