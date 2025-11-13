@@ -34,7 +34,7 @@ Our enterprise service offers comprehensive support and flexibility for business
 - [x] Support multiple code repositories (GitHub, GitLab, Gitee, Gitea, etc.)
 - [x] Support multiple programming languages (Python, Java, C#, JavaScript, etc.)
 - [x] Support repository management (CRUD operations on repositories)
-- [x] Support multiple AI providers (OpenAI, AzureOpenAI, Anthropic, etc.)
+- [x] Support multiple AI providers (OpenAI, AzureOpenAI, Anthropic, Xinference, etc.)
 - [x] Support multiple databases (SQLite, PostgreSQL, SqlServer, MySQL, etc.)
 - [x] Support multiple languages (Chinese, English, French, etc.)
 - [x] Support uploading ZIP files and local files
@@ -159,7 +159,35 @@ services:
       - FeishuBotName=KoalaWiki
 ```
 
-- AzureOpenAI and Anthropic configurations are similar, only need to adjust `ENDPOINT` and `MODEL_PROVIDER`.
+- AzureOpenAI, Anthropic, and Xinference configurations are similar, only need to adjust `ENDPOINT` and `MODEL_PROVIDER`.
+
+- Xinference example:
+
+```yaml
+services:
+  koalawiki:
+    environment:
+      - TASK_MAX_SIZE_PER_USER=2
+      - CHAT_MODEL=qwen2.5-coder-7b-instruct # Xinference model name
+      - ANALYSIS_MODEL=qwen2.5-coder-7b-instruct
+      - CHAT_API_KEY= # Can be empty for local Xinference
+      - LANGUAGE=Chinese
+      - ENDPOINT=http://localhost:9997/v1 # Xinference endpoint
+      - DB_TYPE=sqlite
+      - MODEL_PROVIDER=Xinference # Set to Xinference
+      - DB_CONNECTION_STRING=Data Source=/data/KoalaWiki.db
+      - EnableSmartFilter=true
+      - UPDATE_INTERVAL=5
+      - MAX_FILE_LIMIT=100
+      - DEEP_RESEARCH_MODEL=qwen2.5-coder-7b-instruct
+      - ENABLE_INCREMENTAL_UPDATE=true
+      - ENABLE_CODED_DEPENDENCY_ANALYSIS=false
+      - ENABLE_WAREHOUSE_COMMIT=true
+      - ENABLE_FILE_COMMIT=true
+      - REFINE_AND_ENHANCE_QUALITY=false
+      - CATALOGUE_FORMAT=compact
+      - READ_MAX_TOKENS=100000
+```
 
 ## Database Configuration
 
@@ -301,7 +329,7 @@ graph TD
 - `CHAT_API_KEY`: API key
 - `LANGUAGE`: Document generation language
 - `DB_TYPE`: Database type, supports sqlite, postgres, sqlserver, mysql (default: sqlite)
-- `MODEL_PROVIDER`: Model provider, default OpenAI, supports AzureOpenAI, Anthropic
+- `MODEL_PROVIDER`: Model provider, default OpenAI, supports AzureOpenAI, Anthropic, Xinference
 - `DB_CONNECTION_STRING`: Database connection string
 - `EnableSmartFilter`: Whether to enable smart filtering, affects AI's ability to get repository directories
 - `UPDATE_INTERVAL`: Repository incremental update interval (days)
@@ -404,6 +432,3 @@ This project is licensed under the MIT License. See [LICENSE](./LICENSE) for det
 # ⭐ Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=AIDotNet/OpenDeepWiki&type=Date)](https://www.star-history.com/#AIDotNet/OpenDeepWiki&Date)
-
-
-

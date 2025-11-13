@@ -97,10 +97,8 @@ public class OpenAIOptions
             throw new Exception("ChatModel is empty");
         }
 
-        if (string.IsNullOrEmpty(ChatApiKey))
-        {
-            throw new Exception("ChatApiKey is empty");
-        }
+        // API Key验证已移除，允许服务在没有API Key的情况下启动
+        // AI功能将在实际使用时检查API Key配置
 
         if (string.IsNullOrEmpty(Endpoint))
         {

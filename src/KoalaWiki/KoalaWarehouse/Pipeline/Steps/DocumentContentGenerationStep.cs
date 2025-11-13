@@ -1,6 +1,9 @@
 using System.Diagnostics;
+using KoalaWiki.Domains;
+using KoalaWiki.Domains.DocumentFile;
 using KoalaWiki.KoalaWarehouse.DocumentPending;
 using KoalaWiki.Options;
+using Microsoft.EntityFrameworkCore;
 
 namespace KoalaWiki.KoalaWarehouse.Pipeline.Steps;
 
@@ -19,7 +22,17 @@ public class DocumentContentGenerationStep(ILogger<DocumentContentGenerationStep
 
         try
         {
-            if (context.DocumentCatalogs == null || !context.DocumentCatalogs.Any())
+            // 从步骤结果获取文档目录，如果没有则从数据库查询
+            var documentCatalogs = context.GetStepResult<List<DocumentCatalog>>("生成目录结构");
+            if (documentCatalogs == null)
+            {
+                // 从数据库查询文档目录
+                documentCatalogs = await context.DbContext.DocumentCatalogs
+                    .Where(x => x.WarehouseId == context.Warehouse.Id)
+                    .ToListAsync();
+            }
+
+            if (documentCatalogs == null || !documentCatalogs.Any())
             {
                 Logger.LogWarning("没有文档目录需要生成内容");
                 return context;
@@ -36,21 +49,24 @@ public class DocumentContentGenerationStep(ILogger<DocumentContentGenerationStep
                     false);
             }
 
+            // 从步骤结果获取分类，如果没有则使用仓库的分类
+            var classification = context.GetStepResult<ClassifyType?>("读取或生成项目类别") ?? context.Warehouse.Classify;
+
             await DocumentPendingService.HandlePendingDocumentsAsync(
-                context.DocumentCatalogs, 
-                context.FileKernelInstance, 
+                documentCatalogs, 
+                (Microsoft.SemanticKernel.Kernel)context.FileKernelInstance!, 
                 context.Catalogue ?? string.Empty,
-                context.GitRepository,
+                context.GitRepository?.ToString() ?? string.Empty,
                 context.Warehouse, 
                 context.Document.GitPath, 
                 context.DbContext, 
-                context.Classification);
+                classification);
 
-            activity?.SetTag("documents.processed", context.DocumentCatalogs.Count);
-            context.SetStepResult(StepName, context.DocumentCatalogs.Count);
+            activity?.SetTag("documents.processed", documentCatalogs.Count);
+            context.SetStepResult(StepName, documentCatalogs.Count);
             
             Logger.LogInformation("完成 {StepName} 步骤，处理文档数量: {Count}", 
-                StepName, context.DocumentCatalogs.Count);
+                StepName, documentCatalogs.Count);
         }
         catch (Exception ex)
         {
@@ -65,6 +81,8 @@ public class DocumentContentGenerationStep(ILogger<DocumentContentGenerationStep
     protected override void SetActivityTags(Activity? activity, DocumentProcessingContext input)
     {
         activity?.SetTag("warehouse.id", input.Warehouse.Id);
-        activity?.SetTag("documents.count", input.DocumentCatalogs?.Count ?? 0);
+        // 从步骤结果获取文档目录数量，如果没有则为0
+        var documentCatalogs = input.GetStepResult<List<DocumentCatalog>>("生成目录结构");
+        activity?.SetTag("documents.count", documentCatalogs?.Count ?? 0);
     }
 }

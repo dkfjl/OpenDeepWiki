@@ -38,7 +38,10 @@ public static class KernelFactory
 
         if (OpenAIOptions.ModelProvider.Equals("OpenAI", StringComparison.OrdinalIgnoreCase))
         {
-            kernelBuilder.AddOpenAIChatCompletion(model, new Uri(chatEndpoint), apiKey,
+            // 对于本地服务，API密钥可以为空
+            var effectiveApiKey = string.IsNullOrEmpty(apiKey) ? "no-key-needed" : apiKey;
+            
+            kernelBuilder.AddOpenAIChatCompletion(model, new Uri(chatEndpoint), effectiveApiKey,
                 httpClient: new HttpClient(new KoalaHttpClientHandler()
                 {
                     AutomaticDecompression = DecompressionMethods.GZip |
@@ -64,10 +67,27 @@ public static class KernelFactory
                 Timeout = TimeSpan.FromSeconds(240),
             });
         }
+        else if (OpenAIOptions.ModelProvider.Equals("Xinference", StringComparison.OrdinalIgnoreCase))
+        {
+            // Xinference使用OpenAI兼容的API格式
+            var effectiveApiKey = string.IsNullOrEmpty(apiKey) ? "no-key-needed" : apiKey;
+            
+            kernelBuilder.AddOpenAIChatCompletion(model, new Uri(chatEndpoint), effectiveApiKey,
+                httpClient: new HttpClient(new KoalaHttpClientHandler()
+                {
+                    AutomaticDecompression = DecompressionMethods.GZip |
+                                             DecompressionMethods.Brotli |
+                                             DecompressionMethods.Deflate |
+                                             DecompressionMethods.None
+                })
+                {
+                    Timeout = TimeSpan.FromSeconds(240),
+                });
+        }
         else
         {
             activity?.SetStatus(ActivityStatusCode.Error, "不支持的模型提供者");
-            throw new Exception("暂不支持：" + OpenAIOptions.ModelProvider + "，请使用OpenAI、AzureOpenAI");
+            throw new Exception("暂不支持：" + OpenAIOptions.ModelProvider + "，请使用OpenAI、AzureOpenAI、Xinference");
         }
 
         if (isCodeAnalysis)

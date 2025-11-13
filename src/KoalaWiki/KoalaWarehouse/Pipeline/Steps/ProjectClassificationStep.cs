@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using KoalaWiki.Domains;
 
 namespace KoalaWiki.KoalaWarehouse.Pipeline.Steps;
 
@@ -39,13 +40,15 @@ public class ProjectClassificationStep(ILogger<ProjectClassificationStep> logger
                         false);
                 }
                 
+                // 从步骤结果获取README，如果没有则使用空字符串
+                var readme = context.GetStepResult<string>("读取生成README") ?? string.Empty;
+                
                 classify = await WarehouseClassify.ClassifyAsync(
-                    context.FileKernelInstance, 
+                    (Microsoft.SemanticKernel.Kernel)context.FileKernelInstance!, 
                     context.Catalogue ?? string.Empty, 
-                    context.Readme ?? string.Empty);
+                    readme);
             }
             
-            context.Classification = classify;
             activity?.SetTag("classify", classify?.ToString());
             
             // 更新数据库

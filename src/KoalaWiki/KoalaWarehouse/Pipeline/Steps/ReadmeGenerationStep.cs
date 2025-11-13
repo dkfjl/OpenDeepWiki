@@ -45,7 +45,6 @@ public class ReadmeGenerationStep(ILogger<ReadmeGenerationStep> logger)
         try
         {
             var readme = await GenerateReadMe(context.Warehouse, context.Document.GitPath);
-            context.Readme = readme;
 
             activity?.SetTag("readme.length", readme?.Length ?? 0);
             context.SetStepResult(StepName, readme);
@@ -70,7 +69,8 @@ public class ReadmeGenerationStep(ILogger<ReadmeGenerationStep> logger)
     {
         Logger.LogWarning("README生成失败，尝试使用备选方案，异常: {Exception}", exception.Message);
 
-        input.Readme = "暂无README文件";
+        var fallbackReadme = "暂无README文件";
+        input.SetStepResult(StepName, fallbackReadme);
 
         return await Task.FromResult(input);
     }

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using KoalaWiki.Domains;
 using KoalaWiki.Domains.DocumentFile;
 using KoalaWiki.Entities;
 using KoalaWiki.KoalaWarehouse.GenerateThinkCatalogue;
@@ -20,11 +21,14 @@ public sealed class DocumentStructureGenerationStep(ILogger<DocumentStructureGen
 
         try
         {
+            // 从步骤结果获取分类，如果没有则使用仓库的分类
+            var classification = context.GetStepResult<ClassifyType?>("读取或生成项目类别") ?? context.Warehouse.Classify;
+            
             var result = await GenerateThinkCatalogueService.GenerateCatalogue(
                 context.Document.GitPath,
                 context.Catalogue ?? string.Empty,
                 context.Warehouse,
-                context.Classification).ConfigureAwait(false);
+                classification).ConfigureAwait(false);
 
             var documentCatalogs = new List<DocumentCatalog>();
 
@@ -55,7 +59,6 @@ public sealed class DocumentStructureGenerationStep(ILogger<DocumentStructureGen
             await context.DbContext.DocumentCatalogs.AddRangeAsync(documentCatalogs);
             await context.DbContext.SaveChangesAsync();
 
-            context.DocumentCatalogs = documentCatalogs;
             activity?.SetTag("documents.count", documentCatalogs.Count);
             context.SetStepResult(StepName, documentCatalogs);
 

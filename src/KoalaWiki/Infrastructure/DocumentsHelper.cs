@@ -136,6 +136,7 @@ public class DocumentsHelper
             "Qwen/Qwen3-235B-A22B" => null,
             "grok-3" => 65536,
             "qwen2.5-coder-3b-instruct" => 65535,
+            "qwen2.5-coder-instruct" => 65535,
             "qwen3-235b-a22b" => 16384,
             "claude-sonnet-4-20250514" => 63999,
             "gemini-2.5-pro" => 32768,

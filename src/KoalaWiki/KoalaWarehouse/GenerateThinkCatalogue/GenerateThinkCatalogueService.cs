@@ -5,6 +5,8 @@ using Microsoft.SemanticKernel.Connectors.OpenAI;
 using Newtonsoft.Json;
 using OpenAI.Chat;
 using JsonSerializer = System.Text.Json.JsonSerializer;
+using Newtonsoft.Json.Linq;
+using System.Linq;
 
 namespace KoalaWiki.KoalaWarehouse.GenerateThinkCatalogue;
 
@@ -203,7 +205,7 @@ public static partial class GenerateThinkCatalogueService
 
                 switch (item.InnerContent)
                 {
-                    case StreamingChatCompletionUpdate { Usage.InputTokenCount: > 0 } content:
+                    case StreamingChatCompletionUpdate content when content.Usage?.InputTokenCount > 0:
                         inputTokenCount += content.Usage.InputTokenCount;
                         outputTokenCount += content.Usage.OutputTokenCount;
                         break;
@@ -261,6 +263,45 @@ public static partial class GenerateThinkCatalogueService
         }
         else
         {
+            // 如果没有通过工具调用存储内容，尝试从聊天历史中解析工具调用
+            // foreach (var message in history.Reverse())
+            // {
+            //     if (message.Content.Count > 0)
+            //     {
+            //         var textContent = string.Join("", message.Content.Select(c => c.ToString()));
+            //         if (!string.IsNullOrWhiteSpace(textContent))
+            //         {
+                        // 尝试解析文本中的工具调用格式
+            //             var parsedJson = ParseToolCallFromText(textContent);
+            //             if (parsedJson != null)
+            //             {
+            //                 return ExtractAndParseJson(parsedJson);
+            //             }
+            //         }
+            //     }
+            // }
+
+            // ... 上文省略
+            // 如果没有通过工具调用存储内容，尝试从聊天历史中解析工具调用
+            foreach (var message in history.Reverse())
+            {           
+                // 使用 Any() 替代 Count > 0，避免 method-group 错误并提升性能
+                if (message.Content != null && message.Content.Any())
+                {
+                    var textContent = string.Join("", message.Content.Select(c => c.ToString()));
+                    if (!string.IsNullOrWhiteSpace(textContent))
+                    {
+                        // 尝试解析文本中的工具调用格式
+                        var parsedJson = ParseToolCallFromText(textContent);
+                        if (parsedJson != null)
+                        {
+                            return ExtractAndParseJson(parsedJson);
+                        }
+                    }
+                }
+            }
+
+
             retry++;
             if (retry > 3)
             {
@@ -298,6 +339,51 @@ public static partial class GenerateThinkCatalogueService
         catch (Exception ex)
         {
         }
+    }
+
+    private static string? ParseToolCallFromText(string textContent)
+    {
+        try
+        {
+            // 查找工具调用模式: {"name": "Write", "arguments": {"json": "..."}}
+            var writePattern = @"\{""name""\s*:\s*""Write""\s*,\s*""arguments""\s*:\s*\{\s*""json""\s*:\s*""([^""]*(?:\\.[^""]*)*)""\s*\}\s*\}";
+            var match = System.Text.RegularExpressions.Regex.Match(textContent, writePattern);
+            
+            if (match.Success)
+            {
+                var jsonArg = match.Groups[1].Value;
+                // 解码转义的JSON字符串
+                var decodedJson = System.Text.RegularExpressions.Regex.Unescape(jsonArg)
+                    .Replace("\\\"", "\"")
+                    .Replace("\\\\", "\\");
+                
+                return decodedJson;
+            }
+            
+            // 如果没有找到Write调用，尝试直接查找JSON内容
+            var jsonPattern = @"\{[\s\S]*\}";
+            var jsonMatch = System.Text.RegularExpressions.Regex.Match(textContent, jsonPattern);
+            
+            if (jsonMatch.Success)
+            {
+                try
+                {
+                    // 验证是否为有效的JSON
+                    JToken.Parse(jsonMatch.Value);
+                    return jsonMatch.Value;
+                }
+                catch
+                {
+                    // 不是有效JSON，忽略
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Logger.Warning("解析工具调用失败: {error}", ex.Message);
+        }
+        
+        return null;
     }
 
     private static DocumentResultCatalogue? ExtractAndParseJson(string responseText)
