@@ -3,6 +3,7 @@ using KoalaWiki.BackendService;
 using KoalaWiki.Generate;
 using KoalaWiki.KoalaWarehouse.Extensions;
 using KoalaWiki.Mem0;
+using KoalaWiki.Prompts;
 using KoalaWiki.Services.Feishu.Feishu;
 using Microsoft.AspNetCore.StaticFiles;
 
@@ -178,6 +179,9 @@ using (var scope = app.Services.CreateScope())
 {
     var dbContext = scope.ServiceProvider.GetRequiredService<IKoalaWikiContext>();
     await dbContext.RunMigrateAsync();
+
+    // 初始化PromptContext配置
+    PromptContext.Initialize(scope.ServiceProvider.GetRequiredService<IConfiguration>());
 
     // 初始化动态配置系统
     try
