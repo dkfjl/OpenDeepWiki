@@ -1,4 +1,6 @@
-﻿namespace KoalaWiki.KoalaWarehouse.DocumentPending;
+﻿using System.Text;
+
+namespace KoalaWiki.KoalaWarehouse.DocumentPending;
 
 public partial class DocumentPendingService
 {
@@ -104,6 +106,248 @@ public partial class DocumentPendingService
     }
 
     /// <summary>
+    /// 新增：严格的消息内容验证方法
+    /// </summary>
+    private static (bool isValid, string errorMessage, int tokenLength) ValidateMessageContentStrict(
+        ChatMessageContentItemCollection contents)
+    {
+        if (contents == null || contents.Count == 0)
+            return (false, "消息内容集合为空", 0);
+        
+        var totalText = new StringBuilder();
+        foreach (var content in contents)
+        {
+            var text = content.ToString();
+            if (string.IsNullOrWhiteSpace(text))
+                continue;
+                
+            totalText.Append(text);
+        }
+        
+        var finalText = totalText.ToString().Trim();
+        var tokenLength = finalText.Length; // 简化的token计算
+        
+        if (tokenLength == 0)
+            return (false, "所有消息内容均为空或空白", 0);
+            
+        if (tokenLength > 1048576)
+            return (false, $"消息内容过长: {tokenLength} > 1048576", tokenLength);
+        
+        return (true, string.Empty, tokenLength);
+    }
+
+    /// <summary>
+    /// 新增：修复后的消息构建逻辑
+    /// </summary>
+    private static async Task<ChatHistory> BuildValidatedChatHistory(
+        string catalogue, string gitRepository, string branch, 
+        string catalogName, string prompt, ClassifyType? classifyType)
+    {
+        try
+        {
+            // 预验证输入参数
+            ValidateInputParameters(catalogue, gitRepository, branch, catalogName, prompt);
+            
+            // 获取并验证prompt内容
+            string promptContent = await GetDocumentPendingPrompt(classifyType, catalogue, 
+                gitRepository, branch, catalogName, prompt);
+                
+            if (string.IsNullOrWhiteSpace(promptContent))
+            {
+                throw new InvalidOperationException("生成的prompt内容为空，请检查模板变量替换");
+            }
+            
+            var history = new ChatHistory();
+            history.AddSystemDocs();
+            
+            var contents = new ChatMessageContentItemCollection();
+            
+            // 添加主要prompt内容
+            contents.Add(new TextContent(promptContent));
+            
+            // 添加系统提醒
+            var systemReminder = $"""
+                Generate comprehensive documentation using Docs tools only.
+                Language: {Prompt.Language ?? "中文"}
+                Use parallel File.Read operations for efficiency.
+                Maximum 3 Docs.MultiEdit operations allowed.
+                Never output document content directly in chat.
+                """;
+            
+            contents.Add(new TextContent(systemReminder));
+            
+            // 严格验证
+            var (isValid, errorMessage, tokenLength) = ValidateMessageContentStrict(contents);
+            if (!isValid)
+            {
+                Log.Logger.Error("消息内容验证失败: {Error}, Token长度: {TokenLength}", errorMessage, tokenLength);
+                throw new InvalidOperationException($"消息内容验证失败: {errorMessage}");
+            }
+
+            // 使用纯字符串消息以兼容部分代理/模型，避免422参数校验错误
+            var messageText = new StringBuilder();
+            foreach (var c in contents)
+            {
+                if (c is TextContent t && !string.IsNullOrWhiteSpace(t.Text))
+                {
+                    messageText.AppendLine(t.Text);
+                }
+            }
+            history.AddUserMessage(messageText.ToString().Trim());
+            
+            Log.Logger.Information("消息构建成功，Token长度: {TokenLength}", tokenLength);
+            return history;
+        }
+        catch (Exception ex)
+        {
+            Log.Logger.Error(ex, "构建ChatHistory时发生错误");
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// 新增：验证输入参数
+    /// </summary>
+    private static void ValidateInputParameters(
+        string catalogue, string gitRepository, string branch, 
+        string catalogName, string prompt)
+    {
+        var errors = new List<string>();
+        
+        if (string.IsNullOrWhiteSpace(catalogName))
+            errors.Add("catalogName 不能为空");
+        
+        if (string.IsNullOrWhiteSpace(catalogue))
+            errors.Add("catalogue 不能为空");
+        
+        if (string.IsNullOrWhiteSpace(gitRepository))
+            errors.Add("gitRepository 不能为空");
+        
+        if (string.IsNullOrWhiteSpace(branch))
+            errors.Add("branch 不能为空");
+        
+        if (string.IsNullOrWhiteSpace(prompt))
+            errors.Add("prompt 不能为空");
+        
+        if (errors.Any())
+        {
+            var errorMsg = $"输入参数验证失败: {string.Join(", ", errors)}";
+            Log.Logger.Error(errorMsg);
+            throw new ArgumentException(errorMsg);
+        }
+        
+        Log.Logger.Information("输入参数验证通过 - CatalogName: {CatalogName}, Repository: {Repository}", 
+            catalogName, gitRepository);
+    }
+
+    /// <summary>
+    /// 新增：API请求前的最终验证
+    /// </summary>
+    private static void ValidateChatHistoryBeforeApiCall(ChatHistory history)
+    {
+        if (history == null)
+        {
+            throw new InvalidOperationException("ChatHistory为null，无法发送API请求");
+        }
+        
+        if (history.Count == 0)
+        {
+            throw new InvalidOperationException("ChatHistory为空，无法发送API请求");
+        }
+        
+        var emptyMessages = new List<string>();
+        
+        foreach (var message in history)
+        {
+            if (message is null)
+            {
+                emptyMessages.Add("存在空的消息对象");
+                continue;
+            }
+            
+            // SK 1.66: ChatMessageContent exposes both string Content and Items collection.
+            // Content may be empty when Items carries the actual payload.
+            var contentStr = message.Content;
+            var items = message.Items;
+            
+            var hasStringContent = !string.IsNullOrWhiteSpace(contentStr);
+            var hasItems = items is not null && items.Count > 0;
+            
+            if (!hasStringContent && !hasItems)
+            {
+                emptyMessages.Add($"{message.Role} 消息内容为空（无字符串内容且Items为空）");
+                continue;
+            }
+            
+            // 如果存在字符串内容但为空白
+            if (!hasItems && string.IsNullOrWhiteSpace(contentStr))
+            {
+                emptyMessages.Add($"{message.Role} 消息内容为空字符串");
+            }
+            // 如果存在Items，则检查是否包含有效文本
+            else if (hasItems)
+            {
+                var hasText = false;
+                foreach (var item in items)
+                {
+                    if (item is TextContent textContent && !string.IsNullOrWhiteSpace(textContent.Text))
+                    {
+                        hasText = true;
+                        break;
+                    }
+                }
+                
+                if (!hasText && !hasStringContent)
+                    emptyMessages.Add($"{message.Role} 消息内容集合中没有有效文本");
+            }
+        }
+        
+        if (emptyMessages.Any())
+        {
+            var errorMsg = $"ChatHistory包含无效消息: {string.Join("; ", emptyMessages)}";
+            Log.Logger.Error(errorMsg);
+            throw new InvalidOperationException(errorMsg);
+        }
+        
+        Log.Logger.Information("ChatHistory验证通过，消息数量: {MessageCount}", history.Count);
+    }
+
+    /// <summary>
+    /// 新增：获取模型特定设置
+    /// </summary>
+    private static OpenAIPromptExecutionSettings GetModelSpecificSettings(string model)
+    {
+        var baseSettings = new OpenAIPromptExecutionSettings()
+        {
+            MaxTokens = DocumentsHelper.GetMaxTokens(model),
+            // 禁用工具调用，避免部分代理/模型返回422的参数校验错误
+            ToolCallBehavior = null,
+        };
+        
+        // Qwen模型特殊配置
+        if (IsQwenModel(model))
+        {
+            baseSettings.Temperature = 0.3;
+            baseSettings.TopP = 0.8;
+            // 移除ChatResponseFormat设置，因为该属性可能不存在
+            
+            Log.Logger.Information("应用Qwen模型特殊配置: {Model}", model);
+        }
+        
+        return baseSettings;
+    }
+
+    /// <summary>
+    /// 新增：检查是否为Qwen模型
+    /// </summary>
+    private static bool IsQwenModel(string model)
+    {
+        return !string.IsNullOrEmpty(model) && 
+               (model.Contains("qwen", StringComparison.OrdinalIgnoreCase) || 
+                model.Contains("coder", StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
     /// 处理单个文档的异步方法
     /// <returns>
     /// 返回列表
@@ -119,7 +363,7 @@ public partial class DocumentPendingService
         const int retries = 5;
         var files = new List<string>();
 
-        for (var i = 0; i < 3; i++)
+        for (var retry = 0; retry < 3; retry++)
         {
             try
             {
@@ -132,103 +376,34 @@ public partial class DocumentPendingService
 
                 var docs = new DocsFunction();
                 // 为每个文档处理创建独立的Kernel实例，避免状态管理冲突
+                // 使用纯净kernel创建，不包含任何插件以避免工具调用问题
                 var documentKernel = await KernelFactory.GetKernel(
                     OpenAIOptions.Endpoint,
                     OpenAIOptions.ChatApiKey,
                     path,
                     OpenAIOptions.ChatModel,
-                    false, // 文档生成不需要代码分析功能
-                    files, (builder => { builder.Plugins.AddFromObject(docs, "Docs"); })
-                );
+                    false,
+                    files,
+                    builder =>
+                    {
+                        // 注册文档写作工具，供模型调用 Docs.Write/Docs.Read/Docs.MultiEdit
+                        builder.Plugins.AddFromObject(docs, "Docs");
+                    });
 
                 var chat = documentKernel.Services.GetService<IChatCompletionService>();
 
-                string prompt = await
-                    GetDocumentPendingPrompt(classifyType, catalogue, gitRepository, branch, catalog.Name,
-                        catalog.Prompt);
+                // 使用新的消息构建方法
+                var history = await BuildValidatedChatHistory(catalogue, gitRepository, branch, 
+                    catalog.Name, catalog.Prompt, classifyType);
 
-                var history = new ChatHistory();
-
-                history.AddSystemDocs();
-
-                var contents = new ChatMessageContentItemCollection
-                {
-                    new TextContent(prompt),
-                    new TextContent(
-                        $"""
-                          ```xml
-                          <system-reminder>
-                          For maximum efficiency, whenever you need to perform multiple independent operations, invoke all relevant tools simultaneously rather than sequentially.
-                          Note: The repository's directory structure has been provided in <code_files>. Please utilize the provided structure directly for file navigation and reading operations, rather than relying on glob patterns or filesystem traversal methods.
-                          Below is an example of the directory structure of the warehouse, where /D represents a directory and /F represents a file:
-                          server/D
-                            src/D
-                              Main/F
-                          web/D
-                            components/D
-                              Header.tsx/F
-                          
-                          {Prompt.Language}
-                          
-                          ## Docs Tool Usage Guidelines
-                          
-                          **MANDATORY TOOL USAGE**
-                          - ABSOLUTE REQUIREMENT: ALL document generation, creation, editing, and output MUST use Docs tools exclusively
-                          - STRICTLY PROHIBITED: Direct output of document content in chat responses
-                          - CRITICAL: Never display document content directly in conversation - always use Docs.Write, Docs.MultiEdit, or Docs.Create
-                          - ENFORCEMENT: Any document-related task must result in actual Docs tool invocation, not chat-based content delivery
-                          
-                          **PARALLEL READ OPERATIONS**
-                          - MANDATORY: Always perform PARALLEL File.Read calls — batch multiple files in a SINGLE message for maximum efficiency
-                          - CRITICAL: Read MULTIPLE files simultaneously in one operation
-                          - PROHIBITED: Sequential one-by-one file reads (inefficient and wastes context capacity)
-                          
-                          **EDITING OPERATION LIMITS**
-                          - HARD LIMIT: Maximum of 3 editing operations total (Docs.MultiEdit only)
-                          - PRIORITY: Maximize each Docs.MultiEdit operation by bundling ALL related changes across multiple files
-                          - STRATEGIC PLANNING: Consolidate all modifications into minimal MultiEdit operations to stay within the limit
-                          - Use Docs.Write **only once** for initial creation or full rebuild (counts as initial structure creation, not part of the 3 edits)
-                          - Always verify content before further changes using Docs.Read (Reads do NOT count toward limit)
-                          
-                          **CRITICAL MULTIEDIT BEST PRACTICES**
-                          - MAXIMIZE EFFICIENCY: Each MultiEdit should target multiple distinct sections across files
-                          - AVOID CONFLICTS: Never edit overlapping or identical content regions within the same MultiEdit operation
-                          - UNIQUE TARGETS: Ensure each edit instruction addresses a completely different section or file
-                          - BATCH STRATEGY: Group all necessary changes by proximity and relevance, but maintain clear separation between edit targets
-                          
-                          **DOCUMENT OUTPUT ENFORCEMENT**
-                          - ZERO TOLERANCE: Never output complete documents or substantial document content directly in chat
-                          - TOOL-FIRST APPROACH: Every document creation request must immediately trigger Docs tool usage
-                          - NO EXCEPTIONS: Even for "previews," "examples," or "demonstrations" - use Docs tools to create actual files
-                          - VERIFICATION METHOD: After tool usage, only provide brief status updates and file location information
-                          
-                          **RECOMMENDED EDITING SEQUENCE**
-                          1. Initial creation → Docs.Write (one-time full structure creation)
-                          2. Bulk refinements → Docs.MultiEdit with maximum parallel changes (counts toward 3-operation limit)
-                          3. Validation → Use Docs.Read after each MultiEdit to verify success before next operation
-                          4. Final adjustments → Remaining MultiEdit operations for any missed changes
-                          
-                          **COMPLIANCE VERIFICATION**
-                          - SELF-CHECK: Before responding, verify that no substantial document content appears in your response
-                          - TOOL CONFIRMATION: Ensure every document-related request results in actual Docs tool invocation
-                          - STATUS REPORTING: Provide only brief summaries of what was created/modified, never the full content
-                          </system-reminder>
-                          """)
-                };
-
-                contents.AddDocsGenerateSystemReminder();
-                history.AddUserMessage(contents);
-
-                var settings = new OpenAIPromptExecutionSettings()
-                {
-                    ToolCallBehavior = ToolCallBehavior.AutoInvokeKernelFunctions,
-                    MaxTokens = DocumentsHelper.GetMaxTokens(OpenAIOptions.ChatModel),
-                };
+                // 使用模型特定设置
+                var settings = GetModelSpecificSettings(OpenAIOptions.ChatModel);
                 int count = 1;
                 int inputTokenCount = 0;
                 int outputTokenCount = 0;
                 int maxRetries = 3;
                 CancellationTokenSource token = null;
+                var accumulatedContent = new StringBuilder();
 
                 reset:
 
@@ -236,9 +411,12 @@ public partial class DocumentPendingService
                 {
                     // 创建新的取消令牌（每次重试都重新创建）
                     token?.Dispose();
-                    token = new CancellationTokenSource(TimeSpan.FromMinutes(30)); // 20分钟超时
+                    token = new CancellationTokenSource(TimeSpan.FromMinutes(30)); // 30分钟超时
 
                     Console.WriteLine($"开始处理文档 (尝试 {count}/{maxRetries + 1})，超时设置: 30分钟");
+
+                    // API请求前的最终验证
+                    ValidateChatHistoryBeforeApiCall(history);
 
                     try
                     {
@@ -275,6 +453,19 @@ public partial class DocumentPendingService
                                     if (!string.IsNullOrEmpty(text))
                                     {
                                         Console.Write(text);
+                                        accumulatedContent.Append(text);
+                                    }
+                                    break;
+
+                                case ChatMessageContentItemCollection collection:
+                                    // Handle ChatMessageContentItemCollection content
+                                    foreach (var contentItem in collection)
+                                    {
+                                        if (contentItem is TextContent textContent && !string.IsNullOrEmpty(textContent.Text))
+                                        {
+                                            Console.Write(textContent.Text);
+                                            accumulatedContent.Append(textContent.Text);
+                                        }
                                     }
                                     break;
 
@@ -317,7 +508,17 @@ public partial class DocumentPendingService
                     }
                     catch (HttpRequestException httpEx)
                     {
-                        Console.WriteLine($"网络错误: {httpEx.Message}");
+                        Console.WriteLine($"HTTP错误: {httpEx.Message}");
+                        
+                        // 检查是否是422错误
+                        if (httpEx.Message.Contains("422") || httpEx.Message.Contains("UnprocessableEntity"))
+                        {
+                            Log.Logger.Error("422错误 - 消息内容验证失败: {Message}", httpEx.Message);
+                            Console.WriteLine("422错误: 消息内容验证失败，这通常表示发送的消息为空或格式不正确");
+                            
+                            // 422错误不应该重试，因为这是内容问题
+                            throw new InvalidOperationException("API请求因内容验证失败被拒绝，请检查消息内容", httpEx);
+                        }
 
                         count++;
                         if (count <= maxRetries)
@@ -357,105 +558,15 @@ public partial class DocumentPendingService
                     Console.WriteLine("资源清理完成");
                 }
 
-                if (string.IsNullOrEmpty(docs.Content) && count < 5)
+                if (accumulatedContent.Length == 0 && count < 5)
                 {
                     count++;
                     goto reset;
                 }
 
-
-                if (DocumentOptions.RefineAndEnhanceQuality)
-                {
-                    try
-                    {
-                        var refineContents = new ChatMessageContentItemCollection
-                        {
-                            new TextContent(
-                                """
-                                Please refine and enhance the previous documentation content while maintaining its structure and approach. Focus on:
-
-                                **Enhancement Areas:**
-                                - Deepen existing architectural explanations with more technical detail
-                                - Expand code analysis with additional insights from the repository
-                                - Strengthen existing Mermaid diagrams with more comprehensive representations
-                                - Improve clarity and readability of existing explanations
-                                - Add more specific code references and examples where appropriate
-                                - Enhance existing sections with additional technical depth
-
-                                **Quality Standards:**
-                                - Maintain the 90-10 description-to-code ratio established in the original
-                                - Ensure all additions are evidence-based from the actual code files
-                                - Preserve the Microsoft documentation style approach
-                                - Enhance conceptual understanding through improved explanations
-                                - Strengthen the progressive learning structure
-
-                                **Refinement Protocol (tools only):**
-                                1) Use Docs.Read to review the current document thoroughly.
-                                2) Plan improvements that preserve structure and voice.
-                                3) Apply multiple small, precise Docs.MultiEdit operations to improve clarity, add missing details, and strengthen diagrams/citations.
-                                4) After each edit, re-run Docs.Read to verify changes and continue iterating (at least 2–3 passes).
-                                5) Avoid full overwrites; prefer targeted edits that enhance existing content.
-
-                                Build upon the solid foundation that exists to create even more comprehensive and valuable documentation.
-                                """),
-                            new TextContent(
-                                """
-                                <system-reminder>
-                                CRITICAL: You are now in document refinement phase. Your task is to ENHANCE and IMPROVE the EXISTING documentation content that was just generated, NOT to create completely new content.
-
-                                MANDATORY REQUIREMENTS:
-                                1. PRESERVE the original document structure and organization
-                                2. ENHANCE existing explanations with more depth and clarity
-                                3. IMPROVE technical accuracy and completeness based on actual code analysis
-                                4. EXPAND existing sections with more detailed architectural analysis
-                                5. REFINE language for better readability while maintaining technical precision
-                                6. STRENGTHEN existing Mermaid diagrams or add complementary ones
-                                7. ENSURE all enhancements are based on the code files analyzed in the original generation
-
-                                FORBIDDEN ACTIONS:
-                                - Do NOT restructure or reorganize the document completely
-                                - Do NOT remove existing sections or content
-                                - Do NOT add content not based on the analyzed code files
-                                - Do NOT change the fundamental approach or style established in the original
-
-                                Your goal is to take the good foundation that exists and make it BETTER, MORE DETAILED, and MORE COMPREHENSIVE while preserving its core structure and insights.
-                                </system-reminder>
-                                """),
-                            new TextContent(Prompt.Language)
-                        };
-                        history.AddUserMessage(refineContents);
-
-                        int reset1 = 1;
-                        reset1:
-
-                        await chat.GetChatMessageContentAsync(history, settings, documentKernel);
-
-                        if (string.IsNullOrEmpty(docs.Content) && reset1 < 3)
-                        {
-                            reset1++;
-                            goto reset1;
-                        }
-
-                        // 检查精炼后的内容是否有效
-                        if (!string.IsNullOrWhiteSpace(docs.Content))
-                        {
-                            Log.Logger.Information("文档精炼成功，文档：{name}", catalog.Name);
-                        }
-                        else
-                        {
-                            Log.Logger.Warning("文档精炼后内容为空，使用原始内容，文档：{name}", catalog.Name);
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        Log.Logger.Error("文档精炼失败，使用原始内容，文档：{name}，错误：{error}", catalog.Name, ex.Message);
-                    }
-                }
-
-
                 var fileItem = new DocumentFileItem()
                 {
-                    Content = docs.Content,
+                    Content = accumulatedContent.ToString(),
                     DocumentCatalogId = catalog.Id,
                     Description = string.Empty,
                     Extra = new Dictionary<string, string>(),
@@ -510,7 +621,6 @@ public partial class DocumentPendingService
                 }
             }
         }
-
 
         throw new Exception("处理失败，重试多次仍未成功: " + catalog.Name);
     }

@@ -105,11 +105,17 @@ public static partial class GenerateThinkCatalogueService
         var history = new ChatHistory();
         history.AddSystemEnhance();
 
-        // 极简工具调用指令 - 专门针对Qwen模型优化
-        var qwenToolInstruction = """
-            **重要：你必须使用 catalog.Write 工具输出JSON**
+        // 针对不同模型的指令
+        var qwenToolInstruction = IsQwenModel() ? """
+            **重要：请直接输出JSON格式**
+            - 不要使用任何工具
+            - 直接在聊天中输出完整的JSON
+            - JSON格式必须正确，包含items数组
+            - 不要包含代码块标记（如```json）
+            """ : """
+            **重要：你必须使用 catalog_Write 工具输出JSON**
             - 不要在聊天中直接输出JSON
-            - 必须调用 catalog.Write 工具
+            - 必须调用 catalog_Write 工具
             - 这是强制要求，不是可选项
             """;
 
@@ -119,13 +125,9 @@ public static partial class GenerateThinkCatalogueService
         
         history.AddUserMessage(combinedContent);
 
-        var catalogueTool = new CatalogueFunction();
-        var analysisModel = await KernelFactory.GetKernel(OpenAIOptions.Endpoint,
-            OpenAIOptions.ChatApiKey, path, OpenAIOptions.AnalysisModel, false, null,
-            builder =>
-            {
-                builder.Plugins.AddFromObject(catalogueTool, "catalog");
-            });
+        // 使用纯净kernel创建，不包含任何插件以避免工具调用问题
+        var analysisModel = await KernelFactory.GetCleanKernel(OpenAIOptions.Endpoint,
+            OpenAIOptions.ChatApiKey, path, OpenAIOptions.AnalysisModel, null);
 
         var chat = analysisModel.Services.GetService<IChatCompletionService>();
         if (chat == null)
@@ -135,13 +137,14 @@ public static partial class GenerateThinkCatalogueService
 
         var settings = new OpenAIPromptExecutionSettings()
         {
-            ToolCallBehavior = ToolCallBehavior.AutoInvokeKernelFunctions,
+            ToolCallBehavior = null, // 完全禁用工具调用以避免422错误
             MaxTokens = DocumentsHelper.GetMaxTokens(OpenAIOptions.AnalysisModel)
         };
 
         int retry = 1;
         var inputTokenCount = 0;
         var outputTokenCount = 0;
+        var accumulatedContent = new StringBuilder();
 
         retry:
         var cts = new CancellationTokenSource(TimeSpan.FromMinutes(20));
@@ -179,6 +182,8 @@ public static partial class GenerateThinkCatalogueService
                         if (!string.IsNullOrEmpty(text))
                         {
                             Console.Write(text);
+                            accumulatedContent.Append(text);
+                            
                             if (text.Length > 50)
                             {
                                 Log.Logger.Debug("AI响应片段：{text}...", text.Substring(0, 50));
@@ -190,6 +195,13 @@ public static partial class GenerateThinkCatalogueService
                         }
                         break;
                 }
+            }
+
+            // Qwen模型不再需要工具调用处理，直接使用累积内容
+            if (IsQwenModel() && accumulatedContent.Length > 0)
+            {
+                Log.Logger.Information("Qwen模型累积内容长度：{length}", accumulatedContent.Length);
+                Log.Logger.Information("累积内容前100字符：{content}", accumulatedContent.Length > 100 ? accumulatedContent.ToString().Substring(0, 100) : accumulatedContent.ToString());
             }
         }
         catch (OperationCanceledException) when (cts.Token.IsCancellationRequested)
@@ -216,40 +228,19 @@ public static partial class GenerateThinkCatalogueService
             cts?.Dispose();
         }
 
-        Log.Logger.Information("流式处理完成，输入Token：{inputTokens}，输出Token：{outputTokens}，工具内容长度：{toolContentLength}", 
-            inputTokenCount, outputTokenCount, catalogueTool.Content?.Length ?? 0);
+        Log.Logger.Information("流式处理完成，输入Token：{inputTokens}，输出Token：{outputTokens}，累积内容长度：{contentLength}", 
+            inputTokenCount, outputTokenCount, accumulatedContent.Length);
 
-        if (string.IsNullOrWhiteSpace(catalogueTool.Content))
+        // 对于Qwen模型，直接从累积内容中解析JSON
+        if (IsQwenModel())
         {
-            Log.Logger.Warning("工具内容为空，尝试次数：{attemptNumber}，将进行强制工具调用", attemptNumber + 1);
-            
-            var forceResult = await ForceToolCall(history, chat, settings, analysisModel, attemptNumber);
-            if (forceResult != null)
-            {
-                Log.Logger.Information("强制工具调用成功");
-                return ExtractAndParseJson(forceResult);
-            }
-            
-            if (DocumentOptions.RefineAndEnhanceQuality && attemptNumber < 3)
-            {
-                Log.Logger.Information("开始质量增强流程");
-                await RefineResponse(history, chat, settings, analysisModel);
-                
-                if (!string.IsNullOrWhiteSpace(catalogueTool.Content))
-                {
-                    Log.Logger.Information("质量增强成功，获取到内容");
-                    return ExtractAndParseJson(catalogueTool.Content);
-                }
-            }
-            
-            Log.Logger.Warning("所有尝试均失败，返回null");
-            return null;
+            Log.Logger.Information("Qwen模型直接解析累积内容，内容长度：{length}", accumulatedContent.Length);
+            return ExtractAndParseJson(accumulatedContent.ToString());
         }
-        else
-        {
-            Log.Logger.Information("成功获取工具内容，长度：{length}", catalogueTool.Content.Length);
-            return ExtractAndParseJson(catalogueTool.Content);
-        }
+
+        // 由于禁用了工具调用，所有模型都使用直接JSON解析
+        Log.Logger.Information("使用直接JSON解析模式，累积内容长度：{length}", accumulatedContent.Length);
+        return ExtractAndParseJson(accumulatedContent.ToString());
     }
 
     private static async Task<string?> ForceToolCall(ChatHistory history, IChatCompletionService chat,
@@ -259,10 +250,10 @@ public static partial class GenerateThinkCatalogueService
         {
             // 极简强制工具调用指令
             const string forceToolPrompt = """
-                你必须立即使用 catalog.Write 工具输出JSON！
+                你必须立即使用 catalog_Write 工具输出JSON！
                 
                 要求：
-                1. 立即调用 catalog.Write 工具
+                1. 立即调用 catalog_Write 工具
                 2. 不要在聊天中输出JSON
                 3. 输出基本的文档目录结构
                 
@@ -285,7 +276,7 @@ public static partial class GenerateThinkCatalogueService
                   ]
                 }
                 
-                立即调用 catalog.Write 工具！
+                立即调用 catalog_Write 工具！
                 """;
 
             history.AddUserMessage(forceToolPrompt);
@@ -299,9 +290,27 @@ public static partial class GenerateThinkCatalogueService
                     builder.Plugins.AddFromObject(forceCatalogueTool, "catalog");
                 });
 
-            await foreach (var _ in chat.GetStreamingChatMessageContentsAsync(history, settings, forceKernel))
+            var forceAccumulatedContent = new StringBuilder();
+            await foreach (var item in chat.GetStreamingChatMessageContentsAsync(history, settings, forceKernel))
             {
-                // 处理强制工具调用的响应
+                switch (item.InnerContent)
+                {
+                    case StreamingChatCompletionUpdate value:
+                        var text = value.ContentUpdate.FirstOrDefault()?.Text;
+                        if (!string.IsNullOrEmpty(text))
+                        {
+                            forceAccumulatedContent.Append(text);
+                        }
+                        break;
+                }
+            }
+
+            // 检查强制工具调用是否包含Qwen格式的工具调用
+            if (IsQwenModel() && forceAccumulatedContent.Length > 0)
+            {
+                Log.Logger.Information("强制工具调用检测到Qwen模型，检查特殊工具调用格式");
+                await QwenToolCallHandler.ProcessStreamingContentAsync(
+                    forceAccumulatedContent.ToString(), forceCatalogueTool, chat, history, settings, forceKernel);
             }
             
             Log.Logger.Information("强制工具调用流程完成，工具内容长度：{length}", 
@@ -323,8 +332,8 @@ public static partial class GenerateThinkCatalogueService
         {
             const string refinementPrompt = """
                 使用 catalog 工具优化存储的JSON：
-                - 使用 catalog.Read 检查当前JSON
-                - 应用 catalog.MultiEdit 进行改进（最多3次操作）
+                - 使用 catalog_Read 检查当前JSON
+                - 应用 catalog_MultiEdit 进行改进（最多3次操作）
                 - 专注于：结构、完整性和准确性
                 - 不要在聊天中输出JSON，只使用工具
                 """;
@@ -332,9 +341,29 @@ public static partial class GenerateThinkCatalogueService
             history.AddUserMessage(refinementPrompt);
             Log.Logger.Information("发送质量增强请求");
 
-            await foreach (var _ in chat.GetStreamingChatMessageContentsAsync(history, settings, kernel))
+            var refineAccumulatedContent = new StringBuilder();
+            await foreach (var item in chat.GetStreamingChatMessageContentsAsync(history, settings, kernel))
             {
-                // 简化处理，只记录关键信息
+                switch (item.InnerContent)
+                {
+                    case StreamingChatCompletionUpdate value:
+                        var text = value.ContentUpdate.FirstOrDefault()?.Text;
+                        if (!string.IsNullOrEmpty(text))
+                        {
+                            refineAccumulatedContent.Append(text);
+                        }
+                        break;
+                }
+            }
+
+            // 检查质量增强是否包含Qwen格式的工具调用
+            if (IsQwenModel() && refineAccumulatedContent.Length > 0)
+            {
+                Log.Logger.Information("质量增强检测到Qwen模型，检查特殊工具调用格式");
+                // 需要获取当前的catalogueTool实例来执行工具
+                var catalogueTool = new CatalogueFunction();
+                await QwenToolCallHandler.ProcessStreamingContentAsync(
+                    refineAccumulatedContent.ToString(), catalogueTool, chat, history, settings, kernel);
             }
             
             Log.Logger.Information("质量增强流程完成");
@@ -357,7 +386,40 @@ public static partial class GenerateThinkCatalogueService
                 return null;
             }
 
-            var extractedJson = JsonConvert.DeserializeObject<DocumentResultCatalogue>(responseText);
+            // 清理响应文本，移除可能的代码块标记
+            var cleanedText = responseText.Trim();
+            
+            // 移除可能的代码块标记
+            if (cleanedText.StartsWith("```json"))
+            {
+                cleanedText = cleanedText.Substring(7);
+            }
+            else if (cleanedText.StartsWith("```"))
+            {
+                cleanedText = cleanedText.Substring(3);
+            }
+            
+            if (cleanedText.EndsWith("```"))
+            {
+                cleanedText = cleanedText.Substring(0, cleanedText.Length - 3);
+            }
+            
+            cleanedText = cleanedText.Trim();
+            
+            // 尝试找到JSON对象的开始和结束
+            var startIndex = cleanedText.IndexOf('{');
+            var endIndex = cleanedText.LastIndexOf('}');
+            
+            if (startIndex >= 0 && endIndex > startIndex)
+            {
+                cleanedText = cleanedText.Substring(startIndex, endIndex - startIndex + 1);
+            }
+            
+            Log.Logger.Debug("清理后的JSON长度：{length}", cleanedText.Length);
+            Log.Logger.Debug("清理后的JSON前100字符：{content}", 
+                cleanedText.Length > 100 ? cleanedText.Substring(0, 100) : cleanedText);
+
+            var extractedJson = JsonConvert.DeserializeObject<DocumentResultCatalogue>(cleanedText);
             
             if (extractedJson != null)
             {
@@ -373,7 +435,8 @@ public static partial class GenerateThinkCatalogueService
         }
         catch (Exception ex)
         {
-            Log.Logger.Error(ex, "JSON解析失败");
+            Log.Logger.Error(ex, "JSON解析失败，原始内容：{content}", 
+                responseText?.Length > 200 ? responseText.Substring(0, 200) + "..." : responseText);
             return null;
         }
     }

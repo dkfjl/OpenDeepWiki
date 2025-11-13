@@ -6,7 +6,7 @@ namespace KoalaWiki.KoalaWarehouse.GenerateThinkCatalogue;
 
 public class CatalogueFunction
 {
-    [KernelFunction("Write"), Description("""
+    [KernelFunction("catalog_Write"), Description("""
                                           Generate and store the complete documentation structure JSON.
                                           Usage:
                                           - This tool overwrites the existing catalogue JSON.
@@ -43,7 +43,7 @@ public class CatalogueFunction
         return "<system-reminder>Write successful</system-reminder>";
     }
 
-    [KernelFunction("Read"), Description("""
+    [KernelFunction("catalog_Read"), Description("""
                                          Read the currently stored catalogue JSON for verification.
                                          Usage:
                                          - Returns the entire stored JSON string.
@@ -59,7 +59,7 @@ public class CatalogueFunction
         return Content;
     }
 
-    [KernelFunction("MultiEdit"),Description(
+    [KernelFunction("catalog_MultiEdit"),Description(
 """
 This is a tool that enables multiple revisions to be made to the content at once.It is based on the "Edit" tool and can help you efficiently perform multiple search and replace operations. When you need to edit the content multiple times, it is recommended to use this tool instead of the "Edit" tool.
 

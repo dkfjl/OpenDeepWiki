@@ -32,8 +32,6 @@
     build:
       context: .
       dockerfile: src/KoalaWiki/Dockerfile
-      args:
-        - TARGETPLATFORM=${TARGETPLATFORM:-linux/amd64}
   
   aspire-dashboard:
     image: mcr.microsoft.com/dotnet/aspire-dashboard
