@@ -69,9 +69,15 @@ public partial class DocumentPendingService
 
                 if (fileItem == null || string.IsNullOrEmpty(fileItem.Content))
                 {
-                    // 构建失败
-                    Log.Logger.Error("处理仓库；{path} ,处理标题：{name} 失败:文件内容为空", path, catalog.Name);
-                    throw new Exception("处理失败，文件内容为空: " + catalog.Name);
+                    // 构建失败 - 标记目录为删除状态，避免孤立记录
+                    Log.Logger.Error("处理仓库；{path} ,处理标题：{name} 失败:文件内容为空，将标记为删除", path, catalog.Name);
+                    
+                    // 标记为删除而不是抛出异常，避免影响其他文档处理
+                    await dbContext.DocumentCatalogs.Where(x => x.Id == catalog.Id)
+                        .ExecuteUpdateAsync(x => x.SetProperty(y => y.IsDeleted, true));
+                    
+                    await dbContext.SaveChangesAsync();
+                    continue; // 跳过这个文档，继续处理下一个
                 }
 
                 // 更新文档状态
@@ -99,6 +105,32 @@ public partial class DocumentPendingService
             catch (Exception ex)
             {
                 Log.Logger.Error("处理文档失败: {ex}", ex.ToString());
+                
+                // 发生异常时也标记为删除，避免孤立记录
+                try
+                {
+                    // 尝试从失败的任务中获取文档ID
+                    string documentId = null;
+                    try
+                    {
+                        var result = await completedTask.ConfigureAwait(false);
+                        documentId = result.catalog.Id;
+                    }
+                    catch
+                    {
+                        // 如果无法从completedTask获取，跳过数据库操作
+                        Log.Logger.Warning("无法从失败任务中获取文档ID，跳过删除标记操作");
+                        return;
+                    }
+
+                    await dbContext.DocumentCatalogs.Where(x => x.Id == documentId)
+                        .ExecuteUpdateAsync(x => x.SetProperty(y => y.IsDeleted, true));
+                    await dbContext.SaveChangesAsync();
+                }
+                catch (Exception dbEx)
+                {
+                    Log.Logger.Error("标记失败文档为删除状态时发生数据库错误: {ex}", dbEx.ToString());
+                }
             }
         }
     }
@@ -119,7 +151,7 @@ public partial class DocumentPendingService
         const int retries = 5;
         var files = new List<string>();
 
-        for (var i = 0; i < 3; i++)
+        while (true) // 使用无限循环，内部通过 return 或 throw 退出
         {
             try
             {
@@ -236,7 +268,7 @@ public partial class DocumentPendingService
                 {
                     // 创建新的取消令牌（每次重试都重新创建）
                     token?.Dispose();
-                    token = new CancellationTokenSource(TimeSpan.FromMinutes(30)); // 20分钟超时
+                    token = new CancellationTokenSource(TimeSpan.FromMinutes(30)); // 30分钟超时
 
                     Console.WriteLine($"开始处理文档 (尝试 {count}/{maxRetries + 1})，超时设置: 30分钟");
 
@@ -401,7 +433,7 @@ public partial class DocumentPendingService
                             new TextContent(
                                 """
                                 <system-reminder>
-                                CRITICAL: You are now in document refinement phase. Your task is to ENHANCE and IMPROVE the EXISTING documentation content that was just generated, NOT to create completely new content.
+                                CRITICAL: You are now in DOCUMENT REFINEMENT PHASE. Your task is to ENHANCE and IMPROVE the EXISTING documentation content that was just generated, NOT to create completely new content.
 
                                 MANDATORY REQUIREMENTS:
                                 1. PRESERVE the original document structure and organization
@@ -510,9 +542,6 @@ public partial class DocumentPendingService
                 }
             }
         }
-
-
-        throw new Exception("处理失败，重试多次仍未成功: " + catalog.Name);
     }
 
     /// <summary>
