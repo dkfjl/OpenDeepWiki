@@ -97,11 +97,6 @@ public class OpenAIOptions
             throw new Exception("ChatModel is empty");
         }
 
-        if (string.IsNullOrEmpty(ChatApiKey))
-        {
-            throw new Exception("ChatApiKey is empty");
-        }
-
         if (string.IsNullOrEmpty(Endpoint))
         {
             throw new Exception("Endpoint is empty");

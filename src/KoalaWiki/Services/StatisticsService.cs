@@ -923,15 +923,14 @@ public class StatisticsService(
         try
         {
             // 检查AI配置是否存在
-            var hasApiKey = !string.IsNullOrEmpty(OpenAIOptions.ChatApiKey);
             var hasEndpoint = !string.IsNullOrEmpty(OpenAIOptions.Endpoint);
 
-            if (hasApiKey && hasEndpoint)
+            if (hasEndpoint)
             {
                 return new HealthCheckItemDto
                 {
                     Name = "AI服务",
-                    Status = "健康",
+                    Status = string.IsNullOrEmpty(OpenAIOptions.ChatApiKey) ? "健康（无需API Key）" : "健康",
                     IsHealthy = true,
                     ResponseTime = 0,
                     LastCheckTime = DateTime.UtcNow
@@ -944,7 +943,7 @@ public class StatisticsService(
                     Name = "AI服务",
                     Status = "警告",
                     IsHealthy = false,
-                    Error = "AI服务配置不完整",
+                    Error = "AI服务未配置 Endpoint",
                     LastCheckTime = DateTime.UtcNow
                 };
             }

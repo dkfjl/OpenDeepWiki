@@ -38,5 +38,5 @@ FROM base AS final
 WORKDIR /app
 COPY --from=publish /app/publish .
 # Copy built frontend files to wwwroot
-COPY --from=frontend-build /app/static ./wwwroot
+COPY --from=frontend-build /app/dist ./wwwroot
 ENTRYPOINT ["dotnet", "KoalaWiki.dll"]
