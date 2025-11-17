@@ -114,8 +114,8 @@ const RepositoriesPage: React.FC = () => {
       setSelectedRepositories([])
     } catch (error) {
       console.error('Failed to load repositories:', error)
-      toast.error(t('admin.repositories.errors.loadFailed'), {
-        description: t('admin.repositories.errors.loadFailedDescription')
+      toast.error(t('repositories.errors.loadFailed'), {
+        description: t('repositories.errors.loadFailedDescription')
       })
     } finally {
       setLoading(false)
@@ -219,13 +219,13 @@ const RepositoriesPage: React.FC = () => {
 
     try {
       await repositoryService.deleteRepository(repositoryToDelete.id)
-      toast.success(t('admin.repositories.messages.deleteSuccess'), {
-        description: t('admin.repositories.messages.deleteSuccessDescription', { name: repositoryToDelete.name })
+      toast.success(t('repositories.messages.deleteSuccess'), {
+        description: t('repositories.messages.deleteSuccessDescription', { name: repositoryToDelete.name })
       })
       loadRepositories()
     } catch (error) {
-      toast.error(t('admin.repositories.messages.deleteFailed'), {
-        description: t('admin.repositories.messages.deleteFailedDescription')
+      toast.error(t('repositories.messages.deleteFailed'), {
+        description: t('repositories.messages.deleteFailedDescription')
       })
     } finally {
       setShowDeleteAlert(false)
@@ -237,13 +237,13 @@ const RepositoriesPage: React.FC = () => {
   const handleRefreshRepository = async (id: string, name: string) => {
     try {
       await repositoryService.refreshRepository(id)
-      toast.success(t('admin.repositories.messages.refreshSuccess'), {
-        description: t('admin.repositories.messages.refreshSuccessDescription', { name })
+      toast.success(t('repositories.messages.refreshSuccess'), {
+        description: t('repositories.messages.refreshSuccessDescription', { name })
       })
       loadRepositories()
     } catch (error) {
-      toast.error(t('admin.repositories.messages.refreshFailed'), {
-        description: t('admin.repositories.messages.refreshFailedDescription')
+      toast.error(t('repositories.messages.refreshFailed'), {
+        description: t('repositories.messages.refreshFailedDescription')
       })
     }
   }
@@ -288,7 +288,7 @@ const RepositoriesPage: React.FC = () => {
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" disabled={batchLoading}>
                   {batchLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                  {t('admin.repositories.batchActionsCount', { count: selectedRepositories.length })}
+                  {t('repositories.batchActionsCount', { count: selectedRepositories.length })}
                 </Button>
               </DropdownMenuTrigger>
             </DropdownMenu>
@@ -389,7 +389,7 @@ const RepositoriesPage: React.FC = () => {
                   <TableHead>{t('repositories.table.name')}</TableHead>
                   <TableHead>{t('repositories.table.organization')}</TableHead>
                   <TableHead>{t('repositories.table.status')}</TableHead>
-                  <TableHead className="text-center">{t('admin.repositories.table.statistics')}</TableHead>
+                  <TableHead className="text-center">{t('repositories.table.statistics')}</TableHead>
                   <TableHead>{t('repositories.table.created_at')}</TableHead>
                   <TableHead className="text-right">{t('repositories.table.actions')}</TableHead>
                 </TableRow>
@@ -494,36 +494,36 @@ const RepositoriesPage: React.FC = () => {
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
                             <Button variant="ghost" className="h-8 w-8 p-0">
-                              <span className="sr-only">{t('admin.repositories.actions.openMenu')}</span>
+                              <span className="sr-only">{t('repositories.actions.openMenu')}</span>
                               <MoreHorizontal className="h-4 w-4" />
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <DropdownMenuLabel>{t('admin.repositories.actions.actionMenu')}</DropdownMenuLabel>
+                            <DropdownMenuLabel>{t('repositories.actions.actionMenu')}</DropdownMenuLabel>
                             <DropdownMenuSeparator />
                             <DropdownMenuItem asChild>
                               <Link to={`/${repo.organizationName}/${repo.name}`}>
                                 <Eye className="mr-2 h-4 w-4" />
-                                {t('admin.repositories.actions.viewRepository')}
+                                {t('repositories.actions.viewRepository')}
                               </Link>
                             </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => handleEditRepository(repo)}>
                               <Edit className="mr-2 h-4 w-4" />
-                              {t('admin.repositories.actions.editInfo')}
+                              {t('repositories.actions.editInfo')}
                             </DropdownMenuItem>
                             <DropdownMenuItem asChild>
                               <Link to={`/admin/repositories/${repo.id}`}>
                                 <Settings className="mr-2 h-4 w-4" />
-                                {t('admin.repositories.actions.manageContent')}
+                                {t('repositories.actions.manageContent')}
                               </Link>
                             </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => handleRefreshRepository(repo.id, repo.name)}>
                               <RefreshCw className="mr-2 h-4 w-4" />
-                              {t('admin.repositories.actions.reprocessRepository')}
+                              {t('repositories.actions.reprocessRepository')}
                             </DropdownMenuItem>
                             <DropdownMenuItem>
                               <Download className="mr-2 h-4 w-4" />
-                              {t('admin.repositories.actions.exportMarkdown')}
+                              {t('repositories.actions.exportMarkdown')}
                             </DropdownMenuItem>
                             <DropdownMenuSeparator />
                             <DropdownMenuItem
@@ -531,7 +531,7 @@ const RepositoriesPage: React.FC = () => {
                               onClick={() => handleDeleteRepository(repo)}
                             >
                               <Trash2 className="mr-2 h-4 w-4" />
-                              {t('admin.repositories.actions.deleteRepository')}
+                              {t('repositories.actions.deleteRepository')}
                             </DropdownMenuItem>
                           </DropdownMenuContent>
                         </DropdownMenu>
@@ -552,10 +552,10 @@ const RepositoriesPage: React.FC = () => {
                 onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
                 disabled={currentPage === 1}
               >
-                {t('admin.repositories.previous')}
+                {t('repositories.previous')}
               </Button>
               <div className="text-sm text-muted-foreground">
-                {t('admin.repositories.pageInfo', { current: currentPage, total: Math.ceil(total / pageSize) })}
+                {t('repositories.pageInfo', { current: currentPage, total: Math.ceil(total / pageSize) })}
               </div>
               <Button
                 variant="outline"
@@ -563,7 +563,7 @@ const RepositoriesPage: React.FC = () => {
                 onClick={() => setCurrentPage(prev => prev + 1)}
                 disabled={currentPage >= Math.ceil(total / pageSize)}
               >
-                {t('admin.repositories.next')}
+                {t('repositories.next')}
               </Button>
             </div>
           )}
@@ -592,19 +592,19 @@ const RepositoriesPage: React.FC = () => {
       <AlertDialog open={showDeleteAlert} onOpenChange={setShowDeleteAlert}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>{t('admin.repositories.deleteDialog.title')}</AlertDialogTitle>
+            <AlertDialogTitle>{t('repositories.deleteDialog.title')}</AlertDialogTitle>
             <AlertDialogDescription>
-              {t('admin.repositories.deleteDialog.description', { name: repositoryToDelete?.name })}
+              {t('repositories.deleteDialog.description', { name: repositoryToDelete?.name })}
               <br />
               <span className="text-red-600 font-medium">
-                {t('admin.repositories.deleteDialog.warning')}
+                {t('repositories.deleteDialog.warning')}
               </span>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>{t('admin.repositories.deleteDialog.cancel')}</AlertDialogCancel>
+            <AlertDialogCancel>{t('repositories.deleteDialog.cancel')}</AlertDialogCancel>
             <AlertDialogAction onClick={confirmDeleteRepository} className="bg-red-600 hover:bg-red-700">
-              {t('admin.repositories.deleteDialog.confirmDelete')}
+              {t('repositories.deleteDialog.confirmDelete')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -646,11 +646,11 @@ const EditRepositoryDialog: React.FC<{
     setLoading(true)
     try {
       await repositoryService.updateRepository(repository.id, formData)
-      toast.success(t('admin.repositories.messages.updateSuccess'))
+      toast.success(t('repositories.messages.updateSuccess'))
       onSuccess()
     } catch (error: any) {
-      toast.error(t('admin.repositories.messages.updateFailed'), {
-        description: error.message || t('admin.repositories.messages.updateFailedDescription')
+      toast.error(t('repositories.messages.updateFailed'), {
+        description: error.message || t('repositories.messages.updateFailedDescription')
       })
     } finally {
       setLoading(false)
@@ -662,9 +662,9 @@ const EditRepositoryDialog: React.FC<{
   return (
     <>
       <DialogHeader>
-        <DialogTitle>{t('admin.repositories.editDialog.title')}</DialogTitle>
+        <DialogTitle>{t('repositories.editDialog.title')}</DialogTitle>
         <DialogDescription>
-          {t('admin.repositories.editDialog.description', {
+          {t('repositories.editDialog.description', {
             organizationName: repository.organizationName,
             name: repository.name
           })}
@@ -672,10 +672,10 @@ const EditRepositoryDialog: React.FC<{
       </DialogHeader>
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
-          <Label htmlFor="description">{t('admin.repositories.editDialog.repositoryDescription')}</Label>
+          <Label htmlFor="description">{t('repositories.editDialog.repositoryDescription')}</Label>
           <Textarea
             id="description"
-            placeholder={t('admin.repositories.editDialog.descriptionPlaceholder')}
+            placeholder={t('repositories.editDialog.descriptionPlaceholder')}
             value={formData.description}
             onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
             rows={3}
@@ -687,13 +687,13 @@ const EditRepositoryDialog: React.FC<{
             checked={formData.isRecommended}
             onCheckedChange={(checked) => setFormData(prev => ({ ...prev, isRecommended: checked }))}
           />
-          <Label htmlFor="isRecommended">{t('admin.repositories.editDialog.isRecommended')}</Label>
+          <Label htmlFor="isRecommended">{t('repositories.editDialog.isRecommended')}</Label>
         </div>
         <div>
-          <Label htmlFor="prompt">{t('admin.repositories.editDialog.customPrompt')}</Label>
+          <Label htmlFor="prompt">{t('repositories.editDialog.customPrompt')}</Label>
           <Textarea
             id="prompt"
-            placeholder={t('admin.repositories.editDialog.promptPlaceholder')}
+            placeholder={t('repositories.editDialog.promptPlaceholder')}
             value={formData.prompt}
             onChange={(e) => setFormData(prev => ({ ...prev, prompt: e.target.value }))}
             rows={3}
@@ -701,11 +701,11 @@ const EditRepositoryDialog: React.FC<{
         </div>
         <DialogFooter>
           <Button type="button" variant="outline" onClick={onCancel}>
-            {t('admin.repositories.editDialog.cancel')}
+            {t('repositories.editDialog.cancel')}
           </Button>
           <Button type="submit" disabled={loading}>
             {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            {t('admin.repositories.editDialog.saveChanges')}
+            {t('repositories.editDialog.saveChanges')}
           </Button>
         </DialogFooter>
       </form>

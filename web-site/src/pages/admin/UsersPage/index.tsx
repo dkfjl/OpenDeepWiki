@@ -254,9 +254,9 @@ const UsersPage: React.FC = () => {
 
       {/* 搜索和筛选 */}
       <Card>
-        <CardHeader>
+          <CardHeader>
           <CardTitle>{t('users.userList')}</CardTitle>
-          <CardDescription>{t('users.totalUsers', { count: total })}</CardDescription>
+          <CardDescription>{t('users.totalUsers', { total })}</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="flex items-center space-x-4 mb-4">
@@ -361,7 +361,7 @@ const UsersPage: React.FC = () => {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <DropdownMenuLabel>{t('users.actions_menu')}</DropdownMenuLabel>
+                            <DropdownMenuLabel>{t('users.actionsMenu')}</DropdownMenuLabel>
                             <DropdownMenuSeparator />
                             <DropdownMenuItem onClick={() => handleEditUser(user)}>
                               <Edit className="mr-2 h-4 w-4" />
